@@ -33,16 +33,18 @@ all reachable from outside your home network via a Cloudflare Tunnel.
 
 | Feature | Tool | Access |
 |---|---|---|
-| Remote shell | OpenSSH (`sshd`) | `ssh -p 8022 user@phone-ip` |
-| File transfer | SFTP (built into sshd) | `sftp -P 8022 user@phone-ip` |
+| Remote shell | OpenSSH (`sshd`) | `ssh -p 8022 user@phone-ip` (copy button on dashboard) |
+| Web terminal | ttyd | `https://your-domain/terminal/` |
+| File transfer | SFTP (built into sshd) | `sftp -P 8022 user@phone-ip` (copy button on dashboard) |
 | Downloads | aria2 + AriaNg web UI | `https://your-domain/downloads/` |
-| Video/audio downloader | yt-dlp | via SSH, or wired into aria2 |
+| Video/audio downloader | yt-dlp | via SSH / web terminal, or paste link into dashboard → aria2 |
 | Camera / mic as webcam | IP Webcam (Android app) | `https://your-domain/cam/` |
-| System stats | Glances | `https://your-domain/stats/` |
+| System stats (built-in) | Dashboard live meters via `/api/stats` (no extra deps) | `https://your-domain/` |
+| System stats (full) | Glances (optional) | `https://your-domain/stats/` |
 | Battery / thermal | Termux:API | `https://your-domain/battery.json` |
 | File browser | nginx autoindex | `https://your-domain/files/` |
 | Dashboard + quick actions | Static HTML + Flask API | `https://your-domain/` |
-| External access | Cloudflare Tunnel | no port forwarding, no open ports |
+| External access | Cloudflare Tunnel (URL shown on dashboard) | no port forwarding, no open ports |
 
 ---
 
@@ -71,8 +73,14 @@ all reachable from outside your home network via a Cloudflare Tunnel.
    bash setup-home-server.sh
    ```
 4. It will:
-   - Install all packages (`openssh`, `nginx`, `aria2`, `python`, `git`,
-     `termux-api`, `yt-dlp`, `flask`, `requests`, `glances`)
+    - Install system packages (`openssh`, `nginx`, `aria2`, `python`,
+      `python-pip`, `git`, `wget`, `curl`, `openssl-tool`, `termux-api`,
+      `clang`, `libffi`, `ttyd`, `procps`, `iproute2`)
+    - Install Python tools via pip (`yt-dlp`, `flask`, `requests`) —
+      note: it deliberately does **not** run `pip install --upgrade pip`
+      (forbidden on Termux, breaks the `python-pip` package)
+    - Install Glances via `pkg` (prebuilt — `pip install glances[web]` fails
+      on Termux/Python 3.14 while building `pydantic-core` with Rust/maturin)
    - Ask for storage permission
    - Ask you to set a **basic auth username/password** (protects most routes)
    - Ask for a **Cloudflare tunnel name** (default `homeserver`)
@@ -111,9 +119,16 @@ cp index.html $PREFIX/share/nginx/html/index.html
 nginx -s reload
 ```
 
-This is the landing page at `/` with links and live status dots for every
-service, plus the quick-actions panel (paste a URL to send to aria2, restart
-individual services).
+This is the landing page at `/` with:
+- **System — live** meters (CPU %, load, RAM, storage, network up/down rates
+  + totals, disk I/O, uptime, LAN IP, battery) refreshing every 3s from
+  `/api/stats` — pure stdlib/`/proc`, works even if Glances isn't installed.
+- **Access** cards: SSH and SFTP commands with copy buttons (auto-detected
+  user + LAN IP), web terminal link, Cloudflare tunnel URL with up/down dot
+  (parsed from `~/.cloudflared/config.yml`).
+- **Apps** cards: Download Manager, File Manager, Glances, Camera, Battery.
+- **Quick actions** panel: paste a URL to send to aria2, restart buttons for
+  nginx, aria2, glances, terminal (ttyd), and the tunnel.
 
 ### 3. Termux:Boot
 
@@ -188,6 +203,7 @@ This only needs to be set once per browser (AriaNg stores it locally).
 | sshd | 8022 | all interfaces |
 | aria2 RPC | 6800 | localhost (proxied by nginx) |
 | Glances web | 61208 | all interfaces (behind nginx auth) |
+| ttyd web terminal | 7681 | **localhost only** (proxied by nginx at `/terminal/`) |
 | IP Webcam | 8080 | all interfaces (behind nginx auth) |
 | Flask API backend | 5000 | **localhost only** |
 | nginx | 8080 | all interfaces — the single front door |
@@ -201,14 +217,25 @@ All routes below are served through nginx at `https://home.yourdomain.com/…`:
 
 | Route | What it is | Auth |
 |---|---|---|
-| `/` | Dashboard homepage | none |
-| `/stats/` | Glances system stats | basic auth |
+| `/` | Dashboard homepage (live meters + access + apps) | none |
+| `/stats/` | Glances system stats (optional) | basic auth |
 | `/downloads/` | AriaNg download manager UI | basic auth |
 | `/rpc/` | aria2 JSON-RPC endpoint (used by AriaNg's JS) | basic auth |
 | `/cam/` | Camera/mic live feed (IP Webcam) | basic auth |
 | `/files/` | Raw file browser of `~/downloads/` | basic auth |
+| `/terminal/` | ttyd web terminal (websockets) | basic auth |
 | `/battery.json` | Battery/thermal status | basic auth |
-| `/api/` | Dashboard quick-actions backend | basic auth |
+| `/api/` | Dashboard backend (proxied to Flask on 127.0.0.1:5000) | basic auth |
+
+Backend API (all under `/api/`, same basic auth):
+
+| Endpoint | Method | What it returns |
+|---|---|---|
+| `/api/health` | GET | `{status: ok}` |
+| `/api/stats` | GET | CPU %/load/cores, RAM, disk, net rates+totals, disk I/O, uptime, battery, service flags, tunnel, LAN IP |
+| `/api/info` | GET | SSH/SFTP commands, user, LAN IP, tunnel URL, route map |
+| `/api/add-download` | POST `{url}` | queues URL/magnet in aria2 |
+| `/api/restart/<svc>` | POST | restarts `nginx`\|`aria2`\|`glances`\|`ttyd`\|`cloudflared` |
 
 ---
 
@@ -217,15 +244,17 @@ All routes below are served through nginx at `https://home.yourdomain.com/…`:
 ```
 ~/downloads/              # aria2's download directory, also served at /files/
 ~/AriaNg/                 # AriaNg static web UI (cloned by setup script)
-~/api/app.py              # Flask backend for quick-actions panel
+~/api/app.py              # Flask backend (stats, info, add-download, restart)
 ~/stats/battery.sh        # background loop writing battery.json every 30s
 ~/stats/battery.json      # current battery/thermal snapshot
 ~/.termux/boot/start-server.sh   # runs on every device reboot (Termux:Boot)
+~/.cloudflared/config.yml # tunnel ID + hostname (dashboard reads hostname)
 ~/server-info.txt         # generated secrets/usernames summary
 ~/boot-log.txt            # log of each boot script run
 ~/aria2.log
 ~/glances.log
 ~/api.log
+~/ttyd.log
 ~/cloudflared.log
 
 $PREFIX/etc/nginx/nginx.conf
@@ -240,15 +269,18 @@ $PREFIX/share/nginx/html/index.html   # the dashboard
 - **Queue a download:** open the dashboard, paste a URL or magnet link into
   the quick-actions box, click "Send to aria2." Or use AriaNg directly at
   `/downloads/` for more control (pause, prioritize, see speed/ETA).
-- **Grab a video with yt-dlp:** simplest path is over SSH —
+- **Grab a video with yt-dlp:** over SSH or the web terminal (`/terminal/`) —
   `yt-dlp -P ~/downloads "URL"`. It's not wired into the web UI by default
   since that would mean exposing an arbitrary command runner to the internet.
-- **Check on the server:** `/stats/` for CPU/RAM/disk/network,
-  `/battery.json` for charge level and temperature.
+- **Check on the server:** the dashboard homepage itself shows CPU/RAM/disk/
+  network/I/O/uptime/battery live; `/stats/` (Glances) for full detail,
+  `/battery.json` for raw charge level and temperature.
+- **Connect:** copy the ready-made `ssh`/`sftp` commands from the dashboard
+  Access cards, or open `/terminal/` for an in-browser shell.
 - **Watch the camera:** `/cam/` — also works as a basic audio monitor since
   IP Webcam can stream the mic too, check its in-app settings.
 - **Restart something that's acting up:** dashboard quick-actions panel has
-  a button per service (nginx, aria2, glances, cloudflared).
+  a button per service (nginx, aria2, glances, terminal, cloudflared).
 
 ## Starting, stopping, restarting
 
@@ -262,6 +294,7 @@ bash ~/.termux/boot/start-server.sh
 pkill -f aria2c
 pkill -f glances
 pkill -f cloudflared
+pkill -f ttyd
 nginx -s stop
 ```
 
@@ -272,16 +305,16 @@ nginx -s reload
 
 **Check what's running:**
 ```bash
-pgrep -fl 'sshd|aria2c|glances|nginx|cloudflared|app.py'
+pgrep -fl 'sshd|aria2c|glances|nginx|cloudflared|ttyd|app.py'
 ```
 
 ---
 
 ## Security notes
 
-- The Flask API backend binds `127.0.0.1` only — it's never reachable except
-  through nginx, and nginx puts it behind the same basic auth as everything
-  else. Don't change that binding to `0.0.0.0`.
+- The Flask API backend and ttyd both bind `127.0.0.1` only — they're never
+  reachable except through nginx, and nginx puts them behind the same basic
+  auth as everything else. Don't change those bindings to `0.0.0.0`.
 - The aria2 RPC secret and all restart commands live server-side in
   `app.py`, never exposed to the browser beyond what's needed to make the
   request.
@@ -301,6 +334,45 @@ pgrep -fl 'sshd|aria2c|glances|nginx|cloudflared|app.py'
 ---
 
 ## Troubleshooting
+
+**`ERROR: Installing pip is forbidden, this will break the python-pip package`**
+Never run `pip install --upgrade pip` on Termux — pip is managed via the
+`python-pip` pkg. The setup script already avoids this; if you hit it
+manually, just install your tools instead:
+```bash
+pkg install -y python-pip
+python -m pip install --no-cache-dir -U yt-dlp flask requests
+```
+
+**`Failed to build 'pydantic-core' / maturin / `aarch64-unknown-linux-android`**
+`pip install glances[web]` pulls `fastapi → pydantic-core`, which needs a Rust
+build that Termux doesn't support. Don't install Glances via pip — use the
+prebuilt package:
+```bash
+pkg install -y glances || python -m pip install --no-cache-dir -U glances
+```
+The dashboard's own live meters (`/api/stats`) don't need Glances at all.
+
+**`fish_status_to_signal: Unknown command` spam in the prompt**
+Your fish install is broken (common under VS Code Server on Android).
+```bash
+pkg reinstall fish
+# or switch back to bash:
+chsh -s bash
+```
+then restart Termux.
+
+**Dashboard shows "Could not reach /api/stats"**
+The Flask backend isn't running. Check and restart it:
+```bash
+pgrep -fl app.py
+cat ~/api.log
+pkill -f app.py; python ~/api/app.py >> ~/api.log 2>&1 &
+```
+
+**Tunnel URL shows "detecting…" / "(set … hostname)"**
+The dashboard reads the hostname from `~/.cloudflared/config.yml`. Create it
+(step 6) with a `hostname:` line, then reload the page.
 
 **Nothing starts after a reboot**
 Check `~/boot-log.txt`. If it's empty or missing, Termux:Boot likely hasn't
