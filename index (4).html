@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Home Server</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #1a1d24;
+    --card-hover: #22262f;
+    --text: #e6e8eb;
+    --muted: #8b90a0;
+    --accent: #4f8cff;
+    --border: #2a2e38;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px 16px 60px;
+  }
+  header {
+    max-width: 900px;
+    margin: 0 auto 32px;
+    text-align: center;
+  }
+  header h1 {
+    font-size: 1.6rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  header p {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin-top: 6px;
+  }
+  #clock {
+    font-variant-numeric: tabular-nums;
+  }
+  .grid {
+    max-width: 900px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+  }
+  a.card {
+    display: block;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    text-decoration: none;
+    color: var(--text);
+    transition: background 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+  }
+  a.card:hover {
+    background: var(--card-hover);
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .card .icon {
+    font-size: 1.6rem;
+    margin-bottom: 10px;
+    display: block;
+  }
+  .card .title {
+    font-weight: 600;
+    font-size: 1.02rem;
+    margin-bottom: 4px;
+  }
+  .card .desc {
+    color: var(--muted);
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #3ecf5e;
+    flex-shrink: 0;
+  }
+  .dot.unknown { background: #565b68; }
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.78rem;
+    margin-top: 48px;
+  }
+
+  .panel {
+    max-width: 900px;
+    margin: 0 auto 32px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 22px;
+  }
+  .panel h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 14px;
+  }
+  .add-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .add-row input[type="text"] {
+    flex: 1;
+    min-width: 200px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    color: var(--text);
+    font-size: 0.9rem;
+  }
+  .add-row input[type="text"]:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+  }
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.ghost {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .restart-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+  }
+  #add-msg {
+    margin-top: 10px;
+    font-size: 0.82rem;
+    color: var(--muted);
+    min-height: 1.2em;
+  }
+  #add-msg.ok { color: #3ecf5e; }
+  #add-msg.err { color: #e5484d; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🏠 Home Server</h1>
+  <p id="clock"></p>
+</header>
+
+<div class="panel">
+  <h2>⚡ Quick Actions</h2>
+
+  <div class="add-row">
+    <input type="text" id="download-url" placeholder="Paste a URL or magnet link…">
+    <button id="add-btn" onclick="addDownload()">Send to aria2</button>
+  </div>
+  <div id="add-msg"></div>
+
+  <div class="restart-row">
+    <button class="ghost" onclick="restartService('nginx')">Restart nginx</button>
+    <button class="ghost" onclick="restartService('aria2')">Restart aria2</button>
+    <button class="ghost" onclick="restartService('glances')">Restart glances</button>
+    <button class="ghost" onclick="restartService('cloudflared')">Restart tunnel</button>
+  </div>
+</div>
+
+<div class="grid">
+
+  <a class="card" href="/stats/" target="_blank">
+    <span class="icon">📊</span>
+    <div class="title">System Stats</div>
+    <div class="desc">CPU, RAM, disk, network — live via Glances</div>
+    <div class="status-row"><span class="dot unknown" data-check="/stats/"></span><span class="label">checking…</span></div>
+  </a>
+
+  <a class="card" href="/downloads/" target="_blank">
+    <span class="icon">⬇️</span>
+    <div class="title">Downloads</div>
+    <div class="desc">aria2 + AriaNg — manage downloads and yt-dlp jobs</div>
+    <div class="status-row"><span class="dot unknown" data-check="/downloads/"></span><span class="label">checking…</span></div>
+  </a>
+
+  <a class="card" href="/cam/" target="_blank">
+    <span class="icon">📷</span>
+    <div class="title">Camera / Mic</div>
+    <div class="desc">Live feed from IP Webcam (auth required)</div>
+    <div class="status-row"><span class="dot unknown" data-check="/cam/"></span><span class="label">checking…</span></div>
+  </a>
+
+  <a class="card" href="/files/" target="_blank">
+    <span class="icon">📁</span>
+    <div class="title">File Browser</div>
+    <div class="desc">Browse and grab files from the downloads folder</div>
+    <div class="status-row"><span class="dot unknown" data-check="/files/"></span><span class="label">checking…</span></div>
+  </a>
+
+  <a class="card" href="/battery.json" target="_blank">
+    <span class="icon">🔋</span>
+    <div class="title">Battery / Thermal</div>
+    <div class="desc">Raw JSON from Termux:API battery status</div>
+    <div class="status-row"><span class="dot unknown" data-check="/battery.json"></span><span class="label">checking…</span></div>
+  </a>
+
+</div>
+
+<footer>Served from Termux · nginx · Cloudflare Tunnel</footer>
+
+<script>
+  function updateClock() {
+    const now = new Date();
+    document.getElementById('clock').textContent = now.toLocaleString();
+  }
+  updateClock();
+  setInterval(updateClock, 1000);
+
+  async function addDownload() {
+    const input = document.getElementById('download-url');
+    const btn = document.getElementById('add-btn');
+    const msg = document.getElementById('add-msg');
+    const url = input.value.trim();
+
+    if (!url) {
+      msg.textContent = 'Paste a URL first.';
+      msg.className = 'err';
+      return;
+    }
+
+    btn.disabled = true;
+    msg.textContent = 'Sending…';
+    msg.className = '';
+
+    try {
+      const res = await fetch('/api/add-download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        msg.textContent = `Queued (gid: ${data.gid})`;
+        msg.className = 'ok';
+        input.value = '';
+      } else {
+        msg.textContent = data.error || 'Failed to queue download.';
+        msg.className = 'err';
+      }
+    } catch (e) {
+      msg.textContent = 'Could not reach the API backend.';
+      msg.className = 'err';
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function restartService(service) {
+    if (!confirm(`Restart ${service}? Active connections to it will drop briefly.`)) return;
+
+    const msg = document.getElementById('add-msg');
+    msg.textContent = `Restarting ${service}…`;
+    msg.className = '';
+
+    try {
+      const res = await fetch(`/api/restart/${service}`, { method: 'POST' });
+      const data = await res.json();
+
+      if (res.ok) {
+        msg.textContent = `${service} restarted.`;
+        msg.className = 'ok';
+      } else {
+        msg.textContent = data.error || `Failed to restart ${service}.`;
+        msg.className = 'err';
+      }
+    } catch (e) {
+      msg.textContent = 'Could not reach the API backend.';
+      msg.className = 'err';
+    }
+  }
+
+  // Lightweight status check for each service.
+  // Note: this only confirms the endpoint responds — auth-protected routes
+  // will return 401 which we treat as "up" (reachable), not "down".
+  document.querySelectorAll('[data-check]').forEach(async (dot) => {
+    const url = dot.getAttribute('data-check');
+    const label = dot.nextElementSibling;
+    try {
+      const res = await fetch(url, { method: 'HEAD', mode: 'no-cors' });
+      dot.style.background = '#3ecf5e';
+      label.textContent = 'online';
+    } catch (e) {
+      dot.style.background = '#e5484d';
+      label.textContent = 'unreachable';
+    }
+  });
+</script>
+
+</body>
+</html>
